@@ -1,0 +1,1854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>IWT Pro - Interval Walking Timer</title>
+    <!-- Tailwind CSS for modern responsive styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#0a0d14',
+                        surface: '#141824',
+                        surfaceLight: '#1f2537',
+                        fast: '#ff3b5c',
+                        fastGlow: 'rgba(255, 59, 92, 0.35)',
+                        slow: '#00e599',
+                        slowGlow: 'rgba(0, 229, 153, 0.35)',
+                        warmup: '#f59e0b',
+                        warmupGlow: 'rgba(245, 158, 11, 0.35)',
+                        cooldown: '#38bdf8',
+                        cooldownGlow: 'rgba(56, 189, 248, 0.35)',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+                    },
+                    animation: {
+                        'pulse-glow': 'pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+                    },
+                    keyframes: {
+                        pulseGlow: {
+                            '0%, 100%': { opacity: '0.4' },
+                            '50%': { opacity: '0.85' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        /* Smooth circle transition */
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.35s ease, stroke 0.5s ease;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+
+        /* Glassmorphism utility */
+        .glass-panel {
+            background: rgba(20, 24, 36, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Prevent rubber-banding on iOS while keeping smooth interaction */
+        html, body {
+            overflow: hidden;
+            height: 100%;
+            position: fixed;
+            width: 100%;
+        }
+
+        /* Modal transitions */
+        .modal-enter {
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        .modal-enter-active {
+            opacity: 1;
+            transform: scale(1);
+            transition: opacity 200ms ease-out, transform 200ms ease-out;
+        }
+        .modal-exit {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .modal-exit-active {
+            opacity: 0;
+            transform: scale(0.95);
+            transition: opacity 150ms ease-in, transform 150ms ease-in;
+        }
+    </style>
+</head>
+<body class="bg-darkbg text-slate-100 flex flex-col h-full w-full select-none overflow-hidden relative">
+
+    <div id="ambient-glow" class="absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full blur-[110px] pointer-events-none opacity-20 transition-all duration-700 bg-emerald-500"></div>
+
+    <!-- Floating Turnaround Notification Banner -->
+    <div id="turnaround-banner" class="absolute top-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-2xl bg-amber-400 text-slate-950 font-bold text-xs shadow-xl shadow-amber-400/20 flex items-center gap-2 transform -translate-y-6 opacity-0 pointer-events-none transition-all duration-500 border border-white/20">
+        <svg class="w-4 h-4 animate-spin" style="animation-duration: 3s;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>Halfway Point! Turn around &amp; head back</span>
+    </div>
+
+    <!-- iOS Audio Status Notice Banner -->
+    <div id="ios-sound-notice" class="hidden absolute top-2 left-1/2 -translate-x-1/2 z-40 w-11/12 max-w-sm px-3 py-2 rounded-xl bg-surfaceLight border border-amber-500/40 text-amber-200 text-[11px] shadow-2xl flex items-center justify-between gap-2">
+        <div class="flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span><strong>iPhone Tip:</strong> If Silent Switch is ON, ensure Media Volume is up. Tap <strong>Test Sound</strong>.</span>
+        </div>
+        <button id="dismiss-notice-btn" class="text-amber-400 font-bold px-1.5 py-0.5 rounded hover:bg-white/10">✕</button>
+    </div>
+
+    <!-- MAIN APP WRAPPER -->
+    <div class="relative z-10 flex flex-col h-full max-w-lg mx-auto w-full px-4 pt-3 pb-6 safe-area-inset">
+        
+        <!-- TOP APP BAR -->
+        <header class="flex items-center justify-between py-2 border-b border-white/5">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-fast to-amber-500 flex items-center justify-center font-black text-xs tracking-tighter text-white shadow-lg shadow-fast/20">
+                    IWT
+                </div>
+                <div>
+                    <h1 class="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
+                        Interval Walk
+                        <span id="wake-indicator" class="inline-block w-2 h-2 rounded-full bg-slate-600" title="Wake Lock Inactive"></span>
+                        <span id="media-session-indicator" class="inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold bg-white/10 text-emerald-400" title="Media Session & Headphone Controls Active">HEADPHONES READY</span>
+                    </h1>
+                    <p class="text-[10px] font-medium text-slate-400" id="preset-label">Standard (3m/3m × 5)</p>
+                </div>
+            </div>
+
+            <!-- Top Action Controls -->
+            <div class="flex items-center gap-1.5">
+                <!-- Quick Sound Test & Diagnostic Button -->
+                <button id="test-audio-btn" class="px-2.5 py-1.5 rounded-xl bg-surface hover:bg-surfaceLight active:scale-95 text-slate-300 hover:text-white transition-all border border-white/5 text-[11px] font-bold flex items-center gap-1" title="Test Audio & Voice">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>Test Sound</span>
+                </button>
+
+                <!-- Sound Voice Mute Toggle -->
+                <button id="toggle-audio-btn" class="p-2 rounded-xl bg-surface hover:bg-surfaceLight active:scale-95 text-slate-300 hover:text-white transition-all border border-white/5" title="Toggle Audio Guidance">
+                    <svg id="audio-icon-on" class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    </svg>
+                    <svg id="audio-icon-off" class="w-4 h-4 text-slate-500 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                    </svg>
+                </button>
+
+                <!-- Cadence Metronome Toggle -->
+                <button id="toggle-metronome-btn" class="p-2 rounded-xl bg-surface hover:bg-surfaceLight active:scale-95 text-slate-400 hover:text-white transition-all border border-white/5" title="Cadence Metronome">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </button>
+
+                <!-- Settings Toggle Button -->
+                <button id="open-settings-btn" class="p-2 rounded-xl bg-surface hover:bg-surfaceLight active:scale-95 text-slate-300 hover:text-white transition-all border border-white/5" title="Customize Routine">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <div class="mt-3">
+            <div class="flex items-center justify-between text-[11px] font-semibold tracking-wider text-slate-400 mb-1.5 uppercase">
+                <span id="timeline-current-title">Workout Overview</span>
+                <span id="total-time-tracker">00:00 / 30:00</span>
+            </div>
+            <!-- Segmented Timeline Bar with Midpoint Turnaround Marker -->
+            <div class="relative w-full">
+                <div id="timeline-container" class="flex gap-1 h-2 w-full rounded-full overflow-hidden bg-surface p-0.5 border border-white/5">
+                    <!-- Dynamically generated stage pills -->
+                </div>
+                <!-- 50% Midpoint Indicator Flag -->
+                <div class="absolute -top-1 left-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none group" title="50% Halfway Turnaround">
+                    <div class="w-1.5 h-4 bg-amber-400 rounded-full shadow-sm shadow-amber-400/60 ring-2 ring-darkbg"></div>
+                    <span class="text-[9px] font-extrabold text-amber-400 opacity-70 tracking-tighter mt-0.5">50%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col justify-center items-center my-auto relative py-2">
+            
+            <!-- Stage Status Pill -->
+            <div id="stage-badge" class="mb-3 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 bg-slate-800 text-slate-300 border border-white/10 shadow-sm flex items-center gap-2">
+                <span id="stage-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+                <span id="stage-text">READY</span>
+            </div>
+
+            <!-- SVG Circular Countdown Progress -->
+            <div class="relative w-64 h-64 sm:w-72 sm:h-72 flex items-center justify-center">
+                <svg class="w-full h-full transform" viewBox="0 0 260 260">
+                    <!-- Background Track -->
+                    <circle
+                        cx="130"
+                        cy="130"
+                        r="112"
+                        stroke="rgba(255, 255, 255, 0.06)"
+                        stroke-width="12"
+                        fill="transparent"
+                    />
+                    <!-- Active Countdown Arc -->
+                    <circle
+                        id="progress-circle"
+                        class="progress-ring__circle"
+                        cx="130"
+                        cy="130"
+                        r="112"
+                        stroke="#00e599"
+                        stroke-width="12"
+                        stroke-linecap="round"
+                        fill="transparent"
+                        stroke-dasharray="703.71"
+                        stroke-dashoffset="0"
+                    />
+                </svg>
+
+                <!-- Center Display Overlay -->
+                <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
+                    <span id="interval-count" class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-0.5">
+                        Interval 0 / 5
+                    </span>
+                    <div id="timer-display" class="text-5xl sm:text-6xl font-black tracking-tight text-white font-mono tabular-nums leading-none my-1 select-none">
+                        00:00
+                    </div>
+                    <span id="target-cadence-label" class="text-[11px] font-medium text-slate-400 mt-1 flex items-center gap-1">
+                        <span id="cadence-indicator-dot" class="w-1.5 h-1.5 rounded-full bg-transparent"></span>
+                        <span id="cadence-text">Target: Warm pace</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Next Up Preview Box -->
+            <div id="next-up-card" class="mt-4 px-4 py-1.5 rounded-xl bg-surface/80 border border-white/5 text-[11px] text-slate-400 flex items-center gap-2 max-w-xs transition-opacity duration-300">
+                <span class="font-semibold text-slate-300">Next:</span>
+                <span id="next-stage-text">Fast Walk (3m)</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mb-4">
+            <div class="glass-panel p-2.5 rounded-2xl text-center">
+                <span class="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">Fast Ratio</span>
+                <span id="stat-fast-pct" class="text-sm font-black text-fast">50%</span>
+            </div>
+            <div class="glass-panel p-2.5 rounded-2xl text-center">
+                <span class="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">Sets Left</span>
+                <span id="stat-sets-left" class="text-sm font-black text-white">5</span>
+            </div>
+            <div class="glass-panel p-2.5 rounded-2xl text-center">
+                <span class="block text-[10px] uppercase font-bold text-slate-400 tracking-wider">Est. Burn</span>
+                <span id="stat-calories" class="text-sm font-black text-amber-400">~165 kcal</span>
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-2.5">
+            <!-- Primary Action Bar -->
+            <div class="flex items-center gap-2">
+                <!-- Previous Step Button -->
+                <button id="prev-btn" class="p-4 rounded-2xl bg-surface hover:bg-surfaceLight active:scale-95 text-slate-400 hover:text-white transition-all border border-white/5 disabled:opacity-30 disabled:pointer-events-none" disabled title="Previous Interval">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                </button>
+
+                <!-- Start / Pause / Resume Main Button -->
+                <button id="main-play-btn" class="flex-1 py-4 px-6 rounded-2xl font-extrabold text-base tracking-wider uppercase flex items-center justify-center gap-2.5 bg-slow text-black shadow-lg shadow-slow/25 hover:brightness-105 active:scale-[0.98] transition-all">
+                    <svg id="play-icon" class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z" />
+                    </svg>
+                    <svg id="pause-icon" class="w-5 h-5 fill-current hidden" viewBox="0 0 24 24">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                    </svg>
+                    <span id="main-btn-text">Start Walk</span>
+                </button>
+
+                <!-- Next Step Button -->
+                <button id="next-btn" class="p-4 rounded-2xl bg-surface hover:bg-surfaceLight active:scale-95 text-slate-400 hover:text-white transition-all border border-white/5 disabled:opacity-30 disabled:pointer-events-none" disabled title="Skip to Next Interval">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Secondary Actions (Reset) -->
+            <div class="flex items-center justify-center">
+                <button id="reset-btn" class="text-xs font-semibold text-slate-400 hover:text-rose-400 active:scale-95 transition-colors py-1.5 px-3 rounded-lg hidden">
+                    End &amp; Reset Routine
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="settings-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md hidden transition-opacity duration-200">
+        <div class="bg-surface border border-white/10 w-full max-w-md rounded-3xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            
+            <div class="flex items-center justify-between pb-3 border-b border-white/10">
+                <div class="flex items-center gap-2">
+                    <span class="text-lg font-bold text-white">Workout Settings</span>
+                    <span class="text-[10px] px-2 py-0.5 bg-white/10 rounded-full text-slate-300 font-semibold">IWT Protocol</span>
+                </div>
+                <button id="close-settings-btn" class="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Presets Row -->
+            <div class="py-3 border-b border-white/5">
+                <label class="block text-xs font-semibold text-slate-400 mb-2">QUICK PRESETS</label>
+                <div class="grid grid-cols-3 gap-1.5">
+                    <button class="preset-btn px-2.5 py-1.5 rounded-xl text-xs font-medium bg-surfaceLight hover:bg-white/10 text-white border border-white/5 transition-all text-center" data-preset="standard">
+                        Standard (5×3m)
+                    </button>
+                    <button class="preset-btn px-2.5 py-1.5 rounded-xl text-xs font-medium bg-surfaceLight hover:bg-white/10 text-white border border-white/5 transition-all text-center" data-preset="quick">
+                        Express (3×2m)
+                    </button>
+                    <button class="preset-btn px-2.5 py-1.5 rounded-xl text-xs font-medium bg-surfaceLight hover:bg-white/10 text-white border border-white/5 transition-all text-center" data-preset="endurance">
+                        Pro (6×3m)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Scrollable Controls -->
+            <div class="flex-1 overflow-y-auto py-3 space-y-3.5 pr-1 text-sm">
+                <!-- Warm-up Time -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="font-medium text-white block">Warm-up</span>
+                        <span class="text-[11px] text-slate-400">Gentle prep pace</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-warmup" data-step="-1">-</button>
+                        <span id="cfg-warmup-val" class="w-12 text-center font-mono font-bold text-warmup">3m</span>
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-warmup" data-step="1">+</button>
+                    </div>
+                </div>
+
+                <!-- Fast Walking Time -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="font-medium text-white block">Fast Walk Interval</span>
+                        <span class="text-[11px] text-slate-400">70-85% peak effort</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-fast" data-step="-1">-</button>
+                        <span id="cfg-fast-val" class="w-12 text-center font-mono font-bold text-fast">3m</span>
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-fast" data-step="1">+</button>
+                    </div>
+                </div>
+
+                <!-- Slow Recovery Time -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="font-medium text-white block">Slow Recovery Interval</span>
+                        <span class="text-[11px] text-slate-400">40% recovery pace</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-slow" data-step="-1">-</button>
+                        <span id="cfg-slow-val" class="w-12 text-center font-mono font-bold text-slow">3m</span>
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-slow" data-step="1">+</button>
+                    </div>
+                </div>
+
+                <!-- Total Sets -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="font-medium text-white block">Interval Sets</span>
+                        <span class="text-[11px] text-slate-400">Fast &amp; slow pairs</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-sets" data-step="-1">-</button>
+                        <span id="cfg-sets-val" class="w-12 text-center font-mono font-bold text-white">5</span>
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-sets" data-step="1">+</button>
+                    </div>
+                </div>
+
+                <!-- Cool-down Time -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <span class="font-medium text-white block">Cool-down</span>
+                        <span class="text-[11px] text-slate-400">Heart rate return</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-cooldown" data-step="-1">-</button>
+                        <span id="cfg-cooldown-val" class="w-12 text-center font-mono font-bold text-cooldown">3m</span>
+                        <button class="stepper-btn w-8 h-8 rounded-lg bg-surfaceLight hover:bg-white/20 text-white font-bold" data-target="cfg-cooldown" data-step="1">+</button>
+                    </div>
+                </div>
+
+                <!-- Cues & Feedback Preferences -->
+                <div class="pt-2 border-t border-white/5 space-y-2.5">
+                    <label class="flex items-center justify-between cursor-pointer py-1">
+                        <div>
+                            <span class="text-slate-300 block">Halfway Turnaround Alert</span>
+                            <span class="text-[11px] text-slate-400">Notifies you at 50% to turn back</span>
+                        </div>
+                        <input type="checkbox" id="cfg-halfway-enabled" class="rounded accent-emerald-500 w-4 h-4" checked>
+                    </label>
+                    <label class="flex items-center justify-between cursor-pointer py-1">
+                        <div>
+                            <span class="text-slate-300 block">Smart Music Ducking Voice Coach</span>
+                            <span class="text-[11px] text-slate-400">Ducks music volume during voice prompts and restores it after</span>
+                        </div>
+                        <input type="checkbox" id="cfg-voice-enabled" class="rounded accent-emerald-500 w-4 h-4" checked>
+                    </label>
+                    <label class="flex items-center justify-between cursor-pointer py-1">
+                        <div>
+                            <span class="text-slate-300 block">Lock Screen &amp; Headphone Controls</span>
+                            <span class="text-[11px] text-slate-400">Shows current interval without pausing background music</span>
+                        </div>
+                        <input type="checkbox" id="cfg-media-session-enabled" class="rounded accent-emerald-500 w-4 h-4" checked>
+                    </label>
+                    <label class="flex items-center justify-between cursor-pointer py-1">
+                        <span class="text-slate-300">Countdown Chimes (Last 3s)</span>
+                        <input type="checkbox" id="cfg-beeps-enabled" class="rounded accent-emerald-500 w-4 h-4" checked>
+                    </label>
+                    <label class="flex items-center justify-between cursor-pointer py-1">
+                        <span class="text-slate-300">Vibration Alerts</span>
+                        <input type="checkbox" id="cfg-vibrate-enabled" class="rounded accent-emerald-500 w-4 h-4" checked>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Footer Save -->
+            <div class="pt-3 border-t border-white/10 flex gap-2">
+                <button id="save-settings-btn" class="w-full py-2.5 rounded-xl font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-colors text-center">
+                    Apply &amp; Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="complete-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md hidden transition-opacity duration-300">
+        <div class="bg-surface border border-white/15 w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center flex flex-col items-center">
+            
+            <div class="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mb-4">
+                <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+            </div>
+
+            <h3 class="text-2xl font-black text-white mb-1">Workout Complete!</h3>
+            <p class="text-xs text-slate-400 mb-5">Interval Walking Training scientifically improves aerobic capacity and muscular strength.</p>
+
+            <div class="w-full grid grid-cols-2 gap-2 text-left mb-6">
+                <div class="bg-surfaceLight/60 p-3 rounded-2xl border border-white/5">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block">Total Active Time</span>
+                    <span id="finish-total-time" class="text-lg font-black text-white font-mono">30:00</span>
+                </div>
+                <div class="bg-surfaceLight/60 p-3 rounded-2xl border border-white/5">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block">Fast Pace Time</span>
+                    <span id="finish-fast-time" class="text-lg font-black text-fast font-mono">15:00</span>
+                </div>
+            </div>
+
+            <button id="finish-close-btn" class="w-full py-3 rounded-2xl font-bold bg-emerald-500 text-black hover:bg-emerald-400 active:scale-95 transition-all shadow-lg shadow-emerald-500/20">
+                Done
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // CONFIGURATION STATE (with LocalStorage persistence)
+        const DEFAULT_CONFIG = {
+            warmupMinutes: 3,
+            fastMinutes: 3,
+            slowMinutes: 3,
+            totalSets: 5,
+            cooldownMinutes: 3,
+            halfwayEnabled: true,
+            voiceEnabled: true,
+            beepsEnabled: true,
+            vibrateEnabled: true,
+            mediaSessionEnabled: true,
+            fastCadenceBpm: 130,
+            slowCadenceBpm: 95
+        };
+
+        let CONFIG = { ...DEFAULT_CONFIG };
+
+        // Load configuration from local storage
+        try {
+            const saved = localStorage.getItem('iwt_timer_cfg');
+            if (saved) {
+                CONFIG = { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+            }
+        } catch (e) {
+            console.warn('Storage unavailable', e);
+        }
+
+        // WORKOUT STATE
+        let workoutPlan = []; // Ordered array of segments: [{ type: 'WARMUP'|'FAST'|'SLOW'|'COOLDOWN', duration: seconds, setNum }]
+        let currentSegmentIndex = 0;
+        let segmentTimeRemaining = 0;
+        let isRunning = false;
+        let isPaused = false;
+        let intervalTimer = null;
+        let wakeLock = null;
+        let totalElapsedSeconds = 0;
+        let metronomeInterval = null;
+        let metronomeActive = false;
+        let audioMuted = false;
+        let halfwayAlertTriggered = false;
+
+        // REAL-TIME TIMESTAMP ANCHORS (Prevent pause on sleep / screen off)
+        let workoutStartTimestamp = 0;
+        let lastResumeTimestamp = 0;
+        let accumulatedActiveTime = 0;
+        let silentKeepAliveNode = null;
+        let backgroundWorker = null;
+        let audioProcessorNode = null; // Web Audio thread heartbeat node
+        let activeDuckingCount = 0;     // Ducking reference coordinator
+
+        // SVG Ring constant (Circumference of r=112 is 2 * PI * 112 = 703.71)
+        const RING_CIRCUMFERENCE = 703.71;
+
+        // DOM ELEMENTS CACHE
+        const dom = {
+            ambientGlow: document.getElementById('ambient-glow'),
+            turnaroundBanner: document.getElementById('turnaround-banner'),
+            stageBadge: document.getElementById('stage-badge'),
+            stageDot: document.getElementById('stage-dot'),
+            stageText: document.getElementById('stage-text'),
+            timerDisplay: document.getElementById('timer-display'),
+            intervalCount: document.getElementById('interval-count'),
+            targetCadenceLabel: document.getElementById('target-cadence-label'),
+            cadenceText: document.getElementById('cadence-text'),
+            cadenceDot: document.getElementById('cadence-indicator-dot'),
+            progressCircle: document.getElementById('progress-circle'),
+            timelineContainer: document.getElementById('timeline-container'),
+            timelineTitle: document.getElementById('timeline-current-title'),
+            totalTimeTracker: document.getElementById('total-time-tracker'),
+            nextUpCard: document.getElementById('next-up-card'),
+            nextStageText: document.getElementById('next-stage-text'),
+            mainPlayBtn: document.getElementById('main-play-btn'),
+            mainBtnText: document.getElementById('main-btn-text'),
+            playIcon: document.getElementById('play-icon'),
+            pauseIcon: document.getElementById('pause-icon'),
+            prevBtn: document.getElementById('prev-btn'),
+            nextBtn: document.getElementById('next-btn'),
+            resetBtn: document.getElementById('reset-btn'),
+            statFastPct: document.getElementById('stat-fast-pct'),
+            statSetsLeft: document.getElementById('stat-sets-left'),
+            statCalories: document.getElementById('stat-calories'),
+            wakeIndicator: document.getElementById('wake-indicator'),
+            mediaSessionIndicator: document.getElementById('media-session-indicator'),
+            presetLabel: document.getElementById('preset-label'),
+            // Audio & Metronome
+            toggleAudioBtn: document.getElementById('toggle-audio-btn'),
+            testAudioBtn: document.getElementById('test-audio-btn'),
+            audioIconOn: document.getElementById('audio-icon-on'),
+            audioIconOff: document.getElementById('audio-icon-off'),
+            toggleMetronomeBtn: document.getElementById('toggle-metronome-btn'),
+            // Settings Modal
+            settingsModal: document.getElementById('settings-modal'),
+            openSettingsBtn: document.getElementById('open-settings-btn'),
+            closeSettingsBtn: document.getElementById('close-settings-btn'),
+            saveSettingsBtn: document.getElementById('save-settings-btn'),
+            cfgWarmupVal: document.getElementById('cfg-warmup-val'),
+            cfgFastVal: document.getElementById('cfg-fast-val'),
+            cfgSlowVal: document.getElementById('cfg-slow-val'),
+            cfgSetsVal: document.getElementById('cfg-sets-val'),
+            cfgCooldownVal: document.getElementById('cfg-cooldown-val'),
+            cfgHalfwayEnabled: document.getElementById('cfg-halfway-enabled'),
+            cfgVoiceEnabled: document.getElementById('cfg-voice-enabled'),
+            cfgBeepsEnabled: document.getElementById('cfg-beeps-enabled'),
+            cfgVibrateEnabled: document.getElementById('cfg-vibrate-enabled'),
+            cfgMediaSessionEnabled: document.getElementById('cfg-media-session-enabled'),
+            // Finish Modal
+            completeModal: document.getElementById('complete-modal'),
+            finishTotalTime: document.getElementById('finish-total-time'),
+            finishFastTime: document.getElementById('finish-fast-time'),
+            finishCloseBtn: document.getElementById('finish-close-btn'),
+        };
+
+        // Create an unthrottled inline Web Worker for background precision
+        function initBackgroundWorker() {
+            if (window.Worker && !backgroundWorker) {
+                try {
+                    const workerBlob = new Blob([`
+                        let timer = null;
+                        self.onmessage = function(e) {
+                            if (e.data === 'start') {
+                                if (timer) clearInterval(timer);
+                                timer = setInterval(() => self.postMessage('tick'), 1000);
+                            } else if (e.data === 'stop') {
+                                if (timer) {
+                                    clearInterval(timer);
+                                    timer = null;
+                                }
+                            }
+                        };
+                    `], { type: 'application/javascript' });
+                    backgroundWorker = new Worker(URL.createObjectURL(workerBlob));
+                    backgroundWorker.onmessage = function(e) {
+                        if (e.data === 'tick') {
+                            tick();
+                        }
+                    };
+                } catch (e) {
+                    console.warn('Worker initialization fallback to setInterval:', e);
+                }
+            }
+        }
+
+        // Media Session API: Display info without claiming exclusive playback focus
+        function setupMediaSession() {
+            if (!('mediaSession' in navigator) || !CONFIG.mediaSessionEnabled) return;
+
+            try {
+                // Keep state as 'none' so the timer NEVER intercepts music controls or pauses itself
+                navigator.mediaSession.playbackState = 'none';
+
+                // NOTE: We intentionally DO NOT hook 'pause' or 'stop' handlers here.
+                // Doing so caused external music pauses (AirPods, Spotify) to pause the walk.
+                navigator.mediaSession.setActionHandler('previoustrack', () => {
+                    if (isRunning && currentSegmentIndex > 0) jumpToSegment(currentSegmentIndex - 1);
+                });
+
+                navigator.mediaSession.setActionHandler('nexttrack', () => {
+                    if (isRunning) {
+                        if (currentSegmentIndex < workoutPlan.length - 1) jumpToSegment(currentSegmentIndex + 1);
+                        else finishWorkout();
+                    }
+                });
+            } catch (err) {
+                console.warn('MediaSession handler error:', err);
+            }
+        }
+
+        function updateMediaSessionNotification(stateName, timeStr, setInfo) {
+            if (!('mediaSession' in navigator) || !CONFIG.mediaSessionEnabled) return;
+
+            try {
+                // Keep state as 'none' to allow Spotify/Apple Music to retain primary media playback status
+                navigator.mediaSession.playbackState = 'none';
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: `${stateName} (${timeStr})`,
+                    artist: `IWT Walk — ${setInfo}`,
+                    album: 'Interval Walking Training',
+                    artwork: [
+                        { src: 'https://placehold.co/512x512/141824/00e599?text=IWT+Walk', sizes: '512x512', type: 'image/png' }
+                    ]
+                });
+            } catch (err) {}
+        }
+
+        let audioCtx = null;
+        let audioUnlocked = false;
+        const activeUtterances = new Set();
+        let audioRestoreTimeout = null;
+
+        // Smart Audio Session Coordinator: 'transient' ducks background music; 'ambient' releases ducking to 100%
+        function configureAudioSession(ducking = false) {
+            if (ducking) {
+                activeDuckingCount++;
+                if (audioRestoreTimeout) {
+                    clearTimeout(audioRestoreTimeout);
+                    audioRestoreTimeout = null;
+                }
+                if ('audioSession' in navigator) {
+                    try {
+                        navigator.audioSession.type = 'transient';
+                    } catch (e) {}
+                }
+            } else {
+                activeDuckingCount = Math.max(0, activeDuckingCount - 1);
+                if (activeDuckingCount === 0) {
+                    if (audioRestoreTimeout) clearTimeout(audioRestoreTimeout);
+                    audioRestoreTimeout = setTimeout(() => {
+                        if (activeDuckingCount === 0 && 'audioSession' in navigator) {
+                            try {
+                                navigator.audioSession.type = 'ambient';
+                            } catch (e) {}
+                        }
+                    }, 350);
+                }
+            }
+        }
+
+        // Background audio pipeline heartbeat: keeps the JS event loop running while screen is locked
+        function startKeepAliveAudio() {
+            try {
+                const ctx = getAudioContext();
+                if (!ctx) return;
+                if (ctx.state === 'suspended') ctx.resume();
+
+                // 1. Inaudible oscillator to maintain hardware audio stream connection
+                if (!silentKeepAliveNode) {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.frequency.value = 40; // Inaudible sub-bass
+                    gain.gain.value = 0.00001; // Inaudible gain
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    silentKeepAliveNode = osc;
+                }
+
+                // 2. Real-time audio rendering thread processor (fires even when screen is locked)
+                if (!audioProcessorNode && ctx.createScriptProcessor) {
+                    const processor = ctx.createScriptProcessor(4096, 1, 1);
+                    let lastAudioTick = Date.now();
+                    processor.onaudioprocess = function() {
+                        const now = Date.now();
+                        // Pulse tick every 1000ms from the OS audio thread
+                        if (now - lastAudioTick >= 1000) {
+                            lastAudioTick = now;
+                            if (isRunning && !isPaused) {
+                                tick();
+                            }
+                        }
+                    };
+                    const silentGain = ctx.createGain();
+                    silentGain.gain.value = 0; // Pure silence
+                    processor.connect(silentGain);
+                    silentGain.connect(ctx.destination);
+                    audioProcessorNode = processor;
+                }
+            } catch (e) {
+                console.warn('Keep-alive audio heartbeat warning:', e);
+            }
+        }
+
+        function stopKeepAliveAudio() {
+            if (silentKeepAliveNode) {
+                try {
+                    silentKeepAliveNode.stop();
+                    silentKeepAliveNode.disconnect();
+                } catch (e) {}
+                silentKeepAliveNode = null;
+            }
+            if (audioProcessorNode) {
+                try {
+                    audioProcessorNode.disconnect();
+                } catch (e) {}
+                audioProcessorNode = null;
+            }
+        }
+
+        // Release ducking back to ambient after a given duration
+        function scheduleAudioDuckRelease(delayMs = 350) {
+            setTimeout(() => {
+                configureAudioSession(false);
+            }, delayMs);
+        }
+
+        // IN-MEMORY WAV AUDIO GENERATOR FOR iOS RELIABILITY
+        // Synthesizes clean PCM audio buffers so iOS plays chimes through native HTML5 Audio elements
+        function generateWavSound(notes, sampleRate = 22050) {
+            let totalSamples = 0;
+            notes.forEach(n => { totalSamples += Math.floor(n.duration * sampleRate); });
+            const buffer = new ArrayBuffer(44 + totalSamples * 2);
+            const view = new DataView(buffer);
+
+            // RIFF header
+            const writeStr = (offset, str) => {
+                for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+            };
+            writeStr(0, 'RIFF');
+            view.setUint32(4, 36 + totalSamples * 2, true);
+            writeStr(8, 'WAVE');
+            writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // PCM format
+            view.setUint16(22, 1, true); // Mono
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true); // 16-bit
+            writeStr(36, 'data');
+            view.setUint32(40, totalSamples * 2, true);
+
+            let offset = 44;
+            notes.forEach(n => {
+                const numSamples = Math.floor(n.duration * sampleRate);
+                const freq = n.freq;
+                const vol = n.volume ?? 0.85;
+                for (let i = 0; i < numSamples; i++) {
+                    const env = Math.min(i / (sampleRate * 0.015), (numSamples - i) / (sampleRate * 0.04), 1);
+                    const sample = freq > 0 ? Math.sin(2 * Math.PI * freq * (i / sampleRate)) : 0;
+                    const intSample = Math.max(-32768, Math.min(32767, Math.floor(sample * vol * env * 32767)));
+                    view.setInt16(offset, intSample, true);
+                    offset += 2;
+                }
+            });
+
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        // Pre-generated sound asset URLs & HTML5 Audio players
+        const soundElements = {};
+        function initSoundAssets() {
+            try {
+                const sounds = {
+                    countdown: [{ freq: 880, duration: 0.12, volume: 0.9 }],
+                    fast: [{ freq: 587.33, duration: 0.14, volume: 0.9 }, { freq: 880.00, duration: 0.35, volume: 0.95 }],
+                    slow: [{ freq: 659.25, duration: 0.14, volume: 0.85 }, { freq: 440.00, duration: 0.38, volume: 0.9 }],
+                    halfway: [
+                        { freq: 523.25, duration: 0.13, volume: 0.9 },
+                        { freq: 659.25, duration: 0.13, volume: 0.9 },
+                        { freq: 783.99, duration: 0.13, volume: 0.9 },
+                        { freq: 1046.50, duration: 0.45, volume: 0.95 }
+                    ],
+                    complete: [
+                        { freq: 523.25, duration: 0.12, volume: 0.9 },
+                        { freq: 659.25, duration: 0.12, volume: 0.9 },
+                        { freq: 783.99, duration: 0.12, volume: 0.9 },
+                        { freq: 1046.50, duration: 0.55, volume: 0.95 }
+                    ]
+                };
+
+                for (const [key, notes] of Object.entries(sounds)) {
+                    const blob = generateWavSound(notes);
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio();
+                    audio.src = url;
+                    audio.preload = 'auto';
+                    audio.setAttribute('playsinline', 'true');
+                    audio.setAttribute('webkit-playsinline', 'true');
+                    soundElements[key] = audio;
+                }
+            } catch (err) {
+                console.warn('WAV sound asset init notice:', err);
+            }
+        }
+        initSoundAssets();
+
+        // Ensure voices are loaded asynchronously on mobile
+        let availableVoices = [];
+        if ('speechSynthesis' in window) {
+            const populateVoices = () => {
+                availableVoices = window.speechSynthesis.getVoices();
+            };
+            populateVoices();
+            window.speechSynthesis.onvoiceschanged = populateVoices;
+        }
+
+        // Full mobile audio and speech unlocker on first user touch/click
+        function unlockAudioEngine() {
+            configureAudioSession(false);
+
+            // 1. Prime all HTML5 Audio elements synchronously within user gesture
+            for (const key in soundElements) {
+                const audio = soundElements[key];
+                if (audio) {
+                    audio.play().then(() => {
+                        audio.pause();
+                        audio.currentTime = 0;
+                    }).catch(() => {});
+                }
+            }
+
+            // 2. Unlock Web Audio Context
+            try {
+                const ctx = getAudioContext();
+                if (ctx) {
+                    if (ctx.state === 'suspended') {
+                        ctx.resume();
+                    }
+                    const buffer = ctx.createBuffer(1, 1, 22050);
+                    const source = ctx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(ctx.destination);
+                    source.start(0);
+                }
+            } catch (err) {
+                console.warn('AudioContext unlock notice:', err);
+            }
+
+            // 3. Unlock Speech Synthesis on mobile
+            if ('speechSynthesis' in window) {
+                try {
+                    window.speechSynthesis.resume();
+                    const silentUtterance = new SpeechSynthesisUtterance(' ');
+                    silentUtterance.volume = 0.05;
+                    window.speechSynthesis.speak(silentUtterance);
+                } catch (e) {
+                    console.warn('Speech unlock notice:', e);
+                }
+            }
+
+            audioUnlocked = true;
+        }
+
+        function getAudioContext() {
+            if (!audioCtx) {
+                const AudioClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioClass) {
+                    audioCtx = new AudioClass();
+                    // Auto-recover if another app or system notification suspended the context
+                    audioCtx.onstatechange = () => {
+                        if (audioCtx.state === 'suspended' && isRunning && !isPaused) {
+                            audioCtx.resume().catch(() => {});
+                        }
+                    };
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(() => {});
+            }
+            return audioCtx;
+        }
+
+        // Universal Play Sound Handler: Uses Web Audio / HTML5 Audio with transient ducking
+        function playChime(type = 'transition') {
+            if (audioMuted || !CONFIG.beepsEnabled) return;
+            
+            // Request transient ducking while chime sounds
+            configureAudioSession(true);
+
+            // Strategy A: Native HTML5 Audio Element
+            const audioElement = soundElements[type];
+            if (audioElement) {
+                try {
+                    audioElement.currentTime = 0;
+                    const playPromise = audioElement.play();
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            scheduleAudioDuckRelease(type === 'complete' ? 1200 : 600);
+                        }).catch(() => {
+                            playWebAudioFallback(type);
+                            scheduleAudioDuckRelease(600);
+                        });
+                        return;
+                    }
+                } catch (e) {
+                    playWebAudioFallback(type);
+                    scheduleAudioDuckRelease(600);
+                }
+            } else {
+                playWebAudioFallback(type);
+                scheduleAudioDuckRelease(600);
+            }
+        }
+
+        function playWebAudioFallback(type) {
+            const ctx = getAudioContext();
+            if (!ctx) return;
+            if (ctx.state === 'suspended') ctx.resume();
+
+            if (type === 'countdown') {
+                playBeepNote(880, 0.12, 0);
+            } else if (type === 'halfway') {
+                playBeepNote(523.25, 0.14, 0);
+                playBeepNote(659.25, 0.14, 0.14);
+                playBeepNote(783.99, 0.14, 0.28);
+                playBeepNote(1046.50, 0.45, 0.42);
+            } else if (type === 'fast') {
+                playBeepNote(587.33, 0.12, 0);
+                playBeepNote(880.00, 0.35, 0.12);
+            } else if (type === 'slow') {
+                playBeepNote(659.25, 0.15, 0);
+                playBeepNote(440.00, 0.4, 0.14);
+            } else if (type === 'complete') {
+                playBeepNote(523.25, 0.12, 0);
+                playBeepNote(659.25, 0.12, 0.12);
+                playBeepNote(783.99, 0.12, 0.24);
+                playBeepNote(1046.50, 0.6, 0.36);
+            }
+        }
+
+        function playBeepNote(freq, dur, delay = 0) {
+            const ctx = getAudioContext();
+            if (!ctx) return;
+            const start = ctx.currentTime + delay;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, start);
+            gain.gain.setValueAtTime(0.35, start);
+            gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + dur);
+        }
+
+        // Metronome click for walking cadence
+        function playMetronomeClick() {
+            if (audioMuted) return;
+            const ctx = getAudioContext();
+            if (!ctx) return;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(1200, ctx.currentTime);
+            gain.gain.setValueAtTime(0.08, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.04);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.04);
+        }
+
+        function speak(text) {
+            if (audioMuted || !CONFIG.voiceEnabled || !('speechSynthesis' in window)) return;
+            try {
+                if (window.speechSynthesis.paused) {
+                    window.speechSynthesis.resume();
+                }
+
+                // Activate ducking mode so background music drops volume
+                configureAudioSession(true);
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.05;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                if (availableVoices.length > 0) {
+                    const preferredVoice = availableVoices.find(v => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Siri') || v.name.includes('Samantha') || v.name.includes('Google') || v.default)) || availableVoices.find(v => v.lang.startsWith('en'));
+                    if (preferredVoice) utterance.voice = preferredVoice;
+                }
+
+                activeUtterances.add(utterance);
+
+                // When speech concludes, smoothly release ducking so background music normalizes
+                let completed = false;
+                const handleSpeechEnd = () => {
+                    if (completed) return;
+                    completed = true;
+                    activeUtterances.delete(utterance);
+                    scheduleAudioDuckRelease(200);
+                };
+
+                utterance.onend = handleSpeechEnd;
+                utterance.onerror = handleSpeechEnd;
+
+                // Safety timeout in case speech engine stalls
+                setTimeout(handleSpeechEnd, 6000);
+
+                window.speechSynthesis.speak(utterance);
+            } catch (err) {
+                console.warn('Speech error:', err);
+                scheduleAudioDuckRelease(100);
+            }
+        }
+
+        function triggerVibrate(pattern) {
+            if (CONFIG.vibrateEnabled && 'vibrate' in navigator) {
+                try {
+                    navigator.vibrate(pattern);
+                } catch (e) {}
+            }
+        }
+
+        function generateWorkoutPlan() {
+            const plan = [];
+
+            if (CONFIG.warmupMinutes > 0) {
+                plan.push({
+                    type: 'WARMUP',
+                    name: 'Warm-up',
+                    duration: CONFIG.warmupMinutes * 60,
+                    setNum: null,
+                    color: '#f59e0b',
+                    cadence: 'Easy pace (~90-100 steps/min)'
+                });
+            }
+
+            for (let i = 1; i <= CONFIG.totalSets; i++) {
+                if (CONFIG.fastMinutes > 0) {
+                    plan.push({
+                        type: 'FAST',
+                        name: 'Fast Walk',
+                        duration: CONFIG.fastMinutes * 60,
+                        setNum: i,
+                        color: '#ff3b5c',
+                        cadence: `Brisk pace (~${CONFIG.fastCadenceBpm} steps/min)`
+                    });
+                }
+                if (CONFIG.slowMinutes > 0) {
+                    plan.push({
+                        type: 'SLOW',
+                        name: 'Slow Walk',
+                        duration: CONFIG.slowMinutes * 60,
+                        setNum: i,
+                        color: '#00e599',
+                        cadence: `Recovery pace (~${CONFIG.slowCadenceBpm} steps/min)`
+                    });
+                }
+            }
+
+            if (CONFIG.cooldownMinutes > 0) {
+                plan.push({
+                    type: 'COOLDOWN',
+                    name: 'Cool-down',
+                    duration: CONFIG.cooldownMinutes * 60,
+                    setNum: null,
+                    color: '#38bdf8',
+                    cadence: 'Gentle recovery stroll'
+                });
+            }
+
+            return plan;
+        }
+
+        function calculateTotalPlanDuration() {
+            return workoutPlan.reduce((acc, seg) => acc + seg.duration, 0);
+        }
+
+        function renderTimeline() {
+            dom.timelineContainer.innerHTML = '';
+            const totalSec = calculateTotalPlanDuration();
+
+            workoutPlan.forEach((seg, idx) => {
+                const pill = document.createElement('div');
+                const widthPercent = (seg.duration / totalSec) * 100;
+                pill.style.width = `${widthPercent}%`;
+                pill.className = 'h-full rounded-full transition-all duration-300 relative group cursor-pointer';
+                pill.id = `timeline-seg-${idx}`;
+
+                if (idx < currentSegmentIndex) {
+                    pill.style.backgroundColor = seg.color;
+                    pill.style.opacity = '0.5';
+                } else if (idx === currentSegmentIndex) {
+                    pill.style.backgroundColor = seg.color;
+                    pill.style.opacity = '1';
+                    pill.classList.add('ring-2', 'ring-white/80', 'scale-y-125');
+                } else {
+                    pill.style.backgroundColor = 'rgba(255,255,255,0.12)';
+                }
+
+                pill.title = `${seg.name} (${Math.round(seg.duration / 60)}m)`;
+                pill.addEventListener('click', () => {
+                    if (!isRunning && !isPaused) return;
+                    jumpToSegment(idx);
+                });
+
+                dom.timelineContainer.appendChild(pill);
+            });
+        }
+
+        function updateTimelineProgress() {
+            workoutPlan.forEach((seg, idx) => {
+                const el = document.getElementById(`timeline-seg-${idx}`);
+                if (!el) return;
+                if (idx < currentSegmentIndex) {
+                    el.style.backgroundColor = seg.color;
+                    el.style.opacity = '0.4';
+                    el.className = 'h-full rounded-full transition-all duration-300 relative';
+                } else if (idx === currentSegmentIndex) {
+                    el.style.backgroundColor = seg.color;
+                    el.style.opacity = '1';
+                    el.className = 'h-full rounded-full transition-all duration-300 relative ring-2 ring-white/80 scale-y-125 z-10';
+                } else {
+                    el.style.backgroundColor = 'rgba(255,255,255,0.12)';
+                    el.style.opacity = '1';
+                    el.className = 'h-full rounded-full transition-all duration-300 relative';
+                }
+            });
+        }
+
+        function getTrueElapsedSeconds() {
+            if (!isRunning) return totalElapsedSeconds;
+            if (isPaused) return accumulatedActiveTime;
+            const now = Date.now();
+            const sessionElapsed = Math.max(0, Math.floor((now - lastResumeTimestamp) / 1000));
+            return accumulatedActiveTime + sessionElapsed;
+        }
+
+        function formatMinutesSeconds(sec) {
+            const safeSec = Math.max(0, Math.floor(sec));
+            const m = Math.floor(safeSec / 60).toString().padStart(2, '0');
+            const s = (safeSec % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        // Live calculation of Fast-to-Slow ratio, remaining sets, and estimated calorie burn
+        function updateStatsOverview() {
+            const totalFastSec = CONFIG.fastMinutes * CONFIG.totalSets * 60;
+            const totalSlowSec = CONFIG.slowMinutes * CONFIG.totalSets * 60;
+            const totalIntervalSec = totalFastSec + totalSlowSec;
+
+            const fastRatio = totalIntervalSec > 0 ? Math.round((totalFastSec / totalIntervalSec) * 100) : 50;
+            if (dom.statFastPct) dom.statFastPct.textContent = `${fastRatio}%`;
+
+            // Calculate remaining sets based on current segment
+            let setsRemaining = CONFIG.totalSets;
+            if (workoutPlan[currentSegmentIndex]) {
+                const curSet = workoutPlan[currentSegmentIndex].setNum;
+                if (curSet !== null) {
+                    setsRemaining = Math.max(0, CONFIG.totalSets - curSet + 1);
+                } else if (workoutPlan[currentSegmentIndex].type === 'COOLDOWN') {
+                    setsRemaining = 0;
+                }
+            }
+            if (dom.statSetsLeft) dom.statSetsLeft.textContent = `${setsRemaining}`;
+
+            // Estimated Calories (~5 kcal/min for brisk intervals + warmup/cooldown)
+            const activeMinutes = (totalElapsedSeconds || calculateTotalPlanDuration()) / 60;
+            const estimatedKcal = Math.round(activeMinutes * 5.2);
+            if (dom.statCalories) dom.statCalories.textContent = `~${estimatedKcal} kcal`;
+        }
+
+        function updateUI() {
+            const currentSeg = workoutPlan[currentSegmentIndex] || null;
+            const totalPlanSec = calculateTotalPlanDuration();
+
+            if (!currentSeg) {
+                // Idle or ready state
+                dom.timerDisplay.textContent = formatMinutesSeconds(workoutPlan[0] ? workoutPlan[0].duration : 0);
+                dom.stageText.textContent = 'READY TO WALK';
+                dom.stageBadge.className = 'mb-3 px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 bg-slate-800 text-slate-300 border border-white/10 shadow-sm flex items-center gap-2';
+                dom.stageDot.style.backgroundColor = '#94a3b8';
+                dom.intervalCount.textContent = `0 / ${CONFIG.totalSets} Intervals`;
+                dom.progressCircle.style.strokeDashoffset = '0';
+                dom.progressCircle.style.stroke = '#00e599';
+                dom.nextUpCard.classList.remove('opacity-0');
+                if (workoutPlan[0]) {
+                    dom.nextStageText.textContent = `${workoutPlan[0].name} (${Math.round(workoutPlan[0].duration / 60)}m)`;
+                }
+                dom.totalTimeTracker.textContent = `00:00 / ${formatMinutesSeconds(totalPlanSec)}`;
+                dom.cadenceText.textContent = 'Standard Japanese IWT Method';
+                dom.ambientGlow.className = 'absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full blur-[110px] pointer-events-none opacity-20 transition-all duration-700 bg-emerald-500';
+                updateStatsOverview();
+                updateMediaSessionNotification('Ready to Walk', formatMinutesSeconds(workoutPlan[0]?.duration || 0), 'Tap play to begin');
+                return;
+            }
+
+            // Time remaining in current segment
+            dom.timerDisplay.textContent = formatMinutesSeconds(segmentTimeRemaining);
+            dom.stageText.textContent = currentSeg.name;
+            dom.cadenceText.textContent = currentSeg.cadence;
+            dom.stageDot.style.backgroundColor = currentSeg.color;
+
+            // SVG Circular Countdown Progress
+            const progress = (currentSeg.duration - segmentTimeRemaining) / currentSeg.duration;
+            const offset = RING_CIRCUMFERENCE - (progress * RING_CIRCUMFERENCE);
+            dom.progressCircle.style.strokeDashoffset = `${offset}`;
+            dom.progressCircle.style.stroke = currentSeg.color;
+
+            // Ambient background and badge colors
+            if (currentSeg.type === 'FAST') {
+                dom.ambientGlow.className = 'absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full blur-[110px] pointer-events-none opacity-40 transition-all duration-700 bg-red-600';
+                dom.stageBadge.className = 'mb-3 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 bg-fast/20 text-fast border border-fast/30 shadow-lg shadow-fast/10 flex items-center gap-2';
+            } else if (currentSeg.type === 'SLOW') {
+                dom.ambientGlow.className = 'absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full blur-[110px] pointer-events-none opacity-30 transition-all duration-700 bg-emerald-600';
+                dom.stageBadge.className = 'mb-3 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 bg-slow/20 text-slow border border-slow/30 shadow-lg shadow-slow/10 flex items-center gap-2';
+            } else if (currentSeg.type === 'WARMUP') {
+                dom.ambientGlow.className = 'absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full blur-[110px] pointer-events-none opacity-25 transition-all duration-700 bg-amber-500';
+                dom.stageBadge.className = 'mb-3 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-lg flex items-center gap-2';
+            } else {
+                dom.ambientGlow.className = 'absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full blur-[110px] pointer-events-none opacity-25 transition-all duration-700 bg-cyan-600';
+                dom.stageBadge.className = 'mb-3 px-4 py-1.5 rounded-full text-xs font-bold tracking-widest uppercase transition-all duration-300 bg-sky-500/20 text-sky-400 border border-sky-500/30 shadow-lg flex items-center gap-2';
+            }
+
+            // Interval counter label
+            const setLabel = currentSeg.setNum !== null ? `Set ${currentSeg.setNum} of ${CONFIG.totalSets}` : currentSeg.name;
+            dom.intervalCount.textContent = setLabel;
+
+            // Next Up Display
+            const nextSeg = workoutPlan[currentSegmentIndex + 1];
+            if (nextSeg) {
+                dom.nextUpCard.classList.remove('opacity-0');
+                dom.nextStageText.textContent = `${nextSeg.name} (${Math.round(nextSeg.duration / 60)}m)`;
+            } else {
+                dom.nextUpCard.classList.add('opacity-0');
+            }
+
+            // Header Total Tracker
+            dom.totalTimeTracker.textContent = `${formatMinutesSeconds(totalElapsedSeconds)} / ${formatMinutesSeconds(totalPlanSec)}`;
+
+            // Keep lock screen & smartwatch notification updated
+            updateMediaSessionNotification(currentSeg.name, formatMinutesSeconds(segmentTimeRemaining), setLabel);
+
+            updateStatsOverview();
+            updateTimelineProgress();
+        }
+
+        function tick() {
+            if (!isRunning || isPaused) return;
+
+            // Compute TRUE elapsed seconds using system clock anchor
+            totalElapsedSeconds = getTrueElapsedSeconds();
+            const totalPlanSec = calculateTotalPlanDuration();
+
+            // Check if entire plan finished
+            if (totalElapsedSeconds >= totalPlanSec) {
+                finishWorkout();
+                return;
+            }
+
+            // Map current true active elapsed seconds into the matching segment
+            let accumulated = 0;
+            let targetIdx = 0;
+            let targetRemaining = 0;
+
+            for (let i = 0; i < workoutPlan.length; i++) {
+                const seg = workoutPlan[i];
+                if (totalElapsedSeconds < accumulated + seg.duration) {
+                    targetIdx = i;
+                    targetRemaining = (accumulated + seg.duration) - totalElapsedSeconds;
+                    break;
+                }
+                accumulated += seg.duration;
+            }
+
+            // Detect if segment shifted while locked or during regular tick
+            if (targetIdx !== currentSegmentIndex) {
+                currentSegmentIndex = targetIdx;
+                announceSegmentTransition(workoutPlan[currentSegmentIndex]);
+            }
+
+            const prevRemaining = segmentTimeRemaining;
+            segmentTimeRemaining = targetRemaining;
+
+            // Halfway turnaround check
+            const halfPointSec = Math.floor(totalPlanSec / 2);
+            if (CONFIG.halfwayEnabled && !halfwayAlertTriggered && totalElapsedSeconds >= halfPointSec && totalPlanSec > 0) {
+                triggerHalfwayAlert();
+            }
+
+            // 3-second countdown warning audio & vibration (with ducking)
+            if (segmentTimeRemaining <= 3 && segmentTimeRemaining > 0 && segmentTimeRemaining !== prevRemaining) {
+                playChime('countdown');
+                triggerVibrate(80);
+            }
+
+            updateUI();
+        }
+
+        function triggerHalfwayAlert() {
+            halfwayAlertTriggered = true;
+            playChime('halfway');
+            triggerVibrate([250, 100, 250, 100, 400]);
+            speak("Halfway point. Turn around and head back.");
+
+            // Display visual banner popup with smooth animation
+            if (dom.turnaroundBanner) {
+                dom.turnaroundBanner.classList.remove('opacity-0', '-translate-y-6', 'pointer-events-none');
+                dom.turnaroundBanner.classList.add('opacity-100', 'translate-y-0');
+
+                setTimeout(() => {
+                    if (dom.turnaroundBanner) {
+                        dom.turnaroundBanner.classList.remove('opacity-100', 'translate-y-0');
+                        dom.turnaroundBanner.classList.add('opacity-0', '-translate-y-6', 'pointer-events-none');
+                    }
+                }, 7000);
+            }
+        }
+
+        function jumpToSegment(targetIndex) {
+            if (targetIndex < 0 || targetIndex >= workoutPlan.length) return;
+            currentSegmentIndex = targetIndex;
+
+            // Re-anchor true active time so timeline and elapsed stats match new segment start
+            let accumulatedBefore = 0;
+            for (let i = 0; i < targetIndex; i++) {
+                accumulatedBefore += workoutPlan[i].duration;
+            }
+
+            accumulatedActiveTime = accumulatedBefore;
+            lastResumeTimestamp = Date.now();
+            totalElapsedSeconds = accumulatedBefore;
+            segmentTimeRemaining = workoutPlan[currentSegmentIndex].duration;
+
+            announceSegmentTransition(workoutPlan[currentSegmentIndex]);
+            updateUI();
+        }
+
+        function announceSegmentTransition(segment) {
+            triggerVibrate([200, 100, 200]);
+
+            if (segment.type === 'FAST') {
+                playChime('fast');
+                speak("Fast walk. Pick up your pace and swing your arms.");
+            } else if (segment.type === 'SLOW') {
+                playChime('slow');
+                speak("Slow walk. Catch your breath and recover.");
+            } else if (segment.type === 'WARMUP') {
+                playChime('transition');
+                speak("Warm-up walk. Start at an easy, comfortable pace.");
+            } else if (segment.type === 'COOLDOWN') {
+                playChime('transition');
+                speak("Cool-down walk. Bring your heart rate down gently.");
+            }
+
+            // Sync Cadence metronome if active
+            if (metronomeActive) {
+                restartMetronomeForCurrentSegment();
+            }
+        }
+
+        function startWorkout() {
+            unlockAudioEngine();
+            getAudioContext();
+            initBackgroundWorker();
+            setupMediaSession();
+            startKeepAliveAudio();
+
+            workoutPlan = generateWorkoutPlan();
+            currentSegmentIndex = 0;
+            segmentTimeRemaining = workoutPlan[0].duration;
+            totalElapsedSeconds = 0;
+            accumulatedActiveTime = 0;
+            workoutStartTimestamp = Date.now();
+            lastResumeTimestamp = Date.now();
+            halfwayAlertTriggered = false;
+            isRunning = true;
+            isPaused = false;
+
+            requestWakeLock();
+            renderTimeline();
+            announceSegmentTransition(workoutPlan[0]);
+            updateUI();
+
+            if (backgroundWorker) {
+                backgroundWorker.postMessage('start');
+            } else {
+                clearInterval(intervalTimer);
+                intervalTimer = setInterval(tick, 1000);
+            }
+
+            // Update UI buttons
+            dom.playIcon.classList.add('hidden');
+            dom.pauseIcon.classList.remove('hidden');
+            dom.mainBtnText.textContent = 'Pause';
+            dom.mainPlayBtn.className = 'flex-1 py-4 px-6 rounded-2xl font-extrabold text-base tracking-wider uppercase flex items-center justify-center gap-2.5 bg-amber-400 text-black shadow-lg shadow-amber-400/25 active:scale-[0.98] transition-all';
+            dom.prevBtn.disabled = false;
+            dom.nextBtn.disabled = false;
+            dom.resetBtn.classList.remove('hidden');
+
+            if (metronomeActive) restartMetronomeForCurrentSegment();
+        }
+
+        function pauseWorkout() {
+            isPaused = true;
+            if (backgroundWorker) {
+                backgroundWorker.postMessage('stop');
+            } else {
+                clearInterval(intervalTimer);
+            }
+            stopMetronome();
+            stopKeepAliveAudio();
+            configureAudioSession(false);
+
+            // Freeze elapsed time accurately
+            accumulatedActiveTime = getTrueElapsedSeconds();
+            totalElapsedSeconds = accumulatedActiveTime;
+
+            dom.playIcon.classList.remove('hidden');
+            dom.pauseIcon.classList.add('hidden');
+            dom.mainBtnText.textContent = 'Resume';
+            dom.mainPlayBtn.className = 'flex-1 py-4 px-6 rounded-2xl font-extrabold text-base tracking-wider uppercase flex items-center justify-center gap-2.5 bg-slow text-black shadow-lg shadow-slow/25 active:scale-[0.98] transition-all';
+            
+            updateMediaSessionNotification(workoutPlan[currentSegmentIndex]?.name || 'Paused', formatMinutesSeconds(segmentTimeRemaining), 'Paused');
+            speak("Workout paused");
+        }
+
+        function resumeWorkout() {
+            isPaused = false;
+            getAudioContext();
+            requestWakeLock();
+            startKeepAliveAudio();
+
+            lastResumeTimestamp = Date.now();
+
+            dom.playIcon.classList.add('hidden');
+            dom.pauseIcon.classList.remove('hidden');
+            dom.mainBtnText.textContent = 'Pause';
+            dom.mainPlayBtn.className = 'flex-1 py-4 px-6 rounded-2xl font-extrabold text-base tracking-wider uppercase flex items-center justify-center gap-2.5 bg-amber-400 text-black shadow-lg shadow-amber-400/25 active:scale-[0.98] transition-all';
+
+            if (backgroundWorker) {
+                backgroundWorker.postMessage('start');
+            } else {
+                clearInterval(intervalTimer);
+                intervalTimer = setInterval(tick, 1000);
+            }
+
+            if (metronomeActive) restartMetronomeForCurrentSegment();
+            speak("Resuming walk");
+            tick();
+        }
+
+        function finishWorkout() {
+            if (backgroundWorker) backgroundWorker.postMessage('stop');
+            clearInterval(intervalTimer);
+            stopMetronome();
+            stopKeepAliveAudio();
+            releaseWakeLock();
+            isRunning = false;
+            isPaused = false;
+
+            playChime('complete');
+            triggerVibrate([300, 150, 300, 150, 500]);
+            speak("Outstanding job! Workout completed.");
+
+            // Display Celebration Modal
+            dom.finishTotalTime.textContent = formatMinutesSeconds(totalElapsedSeconds);
+            const fastTotalSec = CONFIG.fastMinutes * CONFIG.totalSets * 60;
+            dom.finishFastTime.textContent = formatMinutesSeconds(fastTotalSec);
+            dom.completeModal.classList.remove('hidden');
+
+            updateMediaSessionNotification('Workout Finished', '00:00', 'Great work!');
+            resetToInitialState();
+        }
+
+        function resetToInitialState() {
+            if (backgroundWorker) backgroundWorker.postMessage('stop');
+            clearInterval(intervalTimer);
+            stopMetronome();
+            stopKeepAliveAudio();
+            releaseWakeLock();
+            configureAudioSession(false);
+            isRunning = false;
+            isPaused = false;
+            currentSegmentIndex = 0;
+            segmentTimeRemaining = 0;
+            totalElapsedSeconds = 0;
+            accumulatedActiveTime = 0;
+            workoutStartTimestamp = 0;
+            lastResumeTimestamp = 0;
+            halfwayAlertTriggered = false;
+
+            if (dom.turnaroundBanner) {
+                dom.turnaroundBanner.classList.remove('opacity-100', 'translate-y-0');
+                dom.turnaroundBanner.classList.add('opacity-0', '-translate-y-6', 'pointer-events-none');
+            }
+
+            workoutPlan = generateWorkoutPlan();
+            renderTimeline();
+            updateUI();
+
+            dom.playIcon.classList.remove('hidden');
+            dom.pauseIcon.classList.add('hidden');
+            dom.mainBtnText.textContent = 'Start Walk';
+            dom.mainPlayBtn.className = 'flex-1 py-4 px-6 rounded-2xl font-extrabold text-base tracking-wider uppercase flex items-center justify-center gap-2.5 bg-slow text-black shadow-lg shadow-slow/25 active:scale-[0.98] transition-all';
+            dom.prevBtn.disabled = true;
+            dom.nextBtn.disabled = true;
+            dom.resetBtn.classList.add('hidden');
+        }
+
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    dom.wakeIndicator.className = 'inline-block w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/80';
+                    dom.wakeIndicator.title = 'Screen Wake Lock Active';
+                } catch (err) {
+                    console.warn('Wake Lock request refused:', err);
+                }
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock !== null) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
+                    dom.wakeIndicator.className = 'inline-block w-2 h-2 rounded-full bg-slate-600';
+                    dom.wakeIndicator.title = 'Wake Lock Inactive';
+                }).catch(() => {});
+            }
+        }
+
+        document.addEventListener('visibilitychange', async () => {
+            if (wakeLock !== null && document.visibilityState === 'visible' && isRunning && !isPaused) {
+                await requestWakeLock();
+            }
+            // Immediately sync display and catch up to absolute real time the moment user looks at phone
+            if (isRunning && !isPaused) {
+                const ctx = getAudioContext();
+                if (ctx && ctx.state === 'suspended') {
+                    ctx.resume().catch(() => {});
+                }
+                tick();
+            }
+        });
+
+        // Ensure backgrounding, tab switching or external music interactions NEVER pause the walk
+        window.addEventListener('pageshow', () => {
+            if (isRunning && !isPaused) {
+                const ctx = getAudioContext();
+                if (ctx && ctx.state === 'suspended') {
+                    ctx.resume().catch(() => {});
+                }
+                tick();
+            }
+        });
+
+        window.addEventListener('focus', () => {
+            if (isRunning && !isPaused) {
+                const ctx = getAudioContext();
+                if (ctx && ctx.state === 'suspended') {
+                    ctx.resume().catch(() => {});
+                }
+                tick();
+            }
+        });
+
+        function restartMetronomeForCurrentSegment() {
+            stopMetronome();
+            if (!metronomeActive || !isRunning || isPaused) return;
+
+            const cur = workoutPlan[currentSegmentIndex];
+            const bpm = (cur && cur.type === 'FAST') ? CONFIG.fastCadenceBpm : CONFIG.slowCadenceBpm;
+            const intervalMs = (60 / bpm) * 1000;
+
+            metronomeInterval = setInterval(() => {
+                playMetronomeClick();
+                // Flash cadence dot
+                dom.cadenceDot.className = 'w-1.5 h-1.5 rounded-full bg-white transition-opacity duration-75';
+                setTimeout(() => {
+                    dom.cadenceDot.className = 'w-1.5 h-1.5 rounded-full bg-transparent transition-opacity duration-75';
+                }, 90);
+            }, intervalMs);
+        }
+
+        function stopMetronome() {
+            if (metronomeInterval) {
+                clearInterval(metronomeInterval);
+                metronomeInterval = null;
+            }
+            dom.cadenceDot.className = 'w-1.5 h-1.5 rounded-full bg-transparent';
+        }
+
+        function toggleMetronome() {
+            metronomeActive = !metronomeActive;
+            if (metronomeActive) {
+                dom.toggleMetronomeBtn.className = 'p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition-all';
+                if (isRunning && !isPaused) restartMetronomeForCurrentSegment();
+            } else {
+                dom.toggleMetronomeBtn.className = 'p-2 rounded-xl bg-surface hover:bg-surfaceLight text-slate-400 border border-white/5 transition-all';
+                stopMetronome();
+            }
+        }
+
+        // Main play/pause button
+        dom.mainPlayBtn.addEventListener('click', () => {
+            if (!isRunning) {
+                startWorkout();
+            } else if (isPaused) {
+                resumeWorkout();
+            } else {
+                pauseWorkout();
+            }
+        });
+
+        // Next and Prev skip buttons
+        dom.nextBtn.addEventListener('click', () => {
+            if (!isRunning) return;
+            if (currentSegmentIndex < workoutPlan.length - 1) {
+                jumpToSegment(currentSegmentIndex + 1);
+            } else {
+                finishWorkout();
+            }
+        });
+
+        dom.prevBtn.addEventListener('click', () => {
+            if (!isRunning) return;
+            if (currentSegmentIndex > 0) {
+                jumpToSegment(currentSegmentIndex - 1);
+            }
+        });
+
+        // Reset button
+        dom.resetBtn.addEventListener('click', () => {
+            if (confirmResetWorkout()) {
+                resetToInitialState();
+            }
+        });
+
+        // Test Sound Button for immediate mobile check
+        if (dom.testAudioBtn) {
+            dom.testAudioBtn.addEventListener('click', () => {
+                unlockAudioEngine();
+                playChime('fast');
+                speak("Sound and voice are working perfectly!");
+            });
+        }
+
+        // Global first user interaction unlock for iOS & Chrome mobile
+        const userUnlockHandler = () => {
+            unlockAudioEngine();
+            window.removeEventListener('click', userUnlockHandler);
+            window.removeEventListener('touchstart', userUnlockHandler);
+        };
+        window.addEventListener('click', userUnlockHandler, { passive: true });
+        window.addEventListener('touchstart', userUnlockHandler, { passive: true });
+
+        // iOS Notice banner display logic
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const noticeEl = document.getElementById('ios-sound-notice');
+        const dismissNoticeBtn = document.getElementById('dismiss-notice-btn');
+
+        if (isIOS && noticeEl && !localStorage.getItem('iwt_ios_notice_dismissed')) {
+            noticeEl.classList.remove('hidden');
+            if (dismissNoticeBtn) {
+                dismissNoticeBtn.addEventListener('click', () => {
+                    noticeEl.classList.add('hidden');
+                    localStorage.setItem('iwt_ios_notice_dismissed', 'true');
+                });
+            }
+        }
+
+        function confirmResetWorkout() {
+            return true;
+        }
+
+        // Audio toggle button
+        dom.toggleAudioBtn.addEventListener('click', () => {
+            audioMuted = !audioMuted;
+            if (audioMuted) {
+                dom.audioIconOn.classList.add('hidden');
+                dom.audioIconOff.classList.remove('hidden');
+            } else {
+                dom.audioIconOn.classList.remove('hidden');
+                dom.audioIconOff.classList.add('hidden');
+                getAudioContext();
+            }
+        });
+
+        // Metronome button
+        dom.toggleMetronomeBtn.addEventListener('click', toggleMetronome);
+
+        // Settings Modal Open/Close
+        function openSettings() {
+            dom.cfgWarmupVal.textContent = `${CONFIG.warmupMinutes}m`;
+            dom.cfgFastVal.textContent = `${CONFIG.fastMinutes}m`;
+            dom.cfgSlowVal.textContent = `${CONFIG.slowMinutes}m`;
+            dom.cfgSetsVal.textContent = `${CONFIG.totalSets}`;
+            dom.cfgCooldownVal.textContent = `${CONFIG.cooldownMinutes}m`;
+            dom.cfgHalfwayEnabled.checked = CONFIG.halfwayEnabled !== false;
+            dom.cfgVoiceEnabled.checked = CONFIG.voiceEnabled;
+            dom.cfgBeepsEnabled.checked = CONFIG.beepsEnabled;
+            dom.cfgVibrateEnabled.checked = CONFIG.vibrateEnabled;
+            if (dom.cfgMediaSessionEnabled) {
+                dom.cfgMediaSessionEnabled.checked = CONFIG.mediaSessionEnabled !== false;
+            }
+
+            dom.settingsModal.classList.remove('hidden');
+        }
+
+        function closeSettings() {
+            dom.settingsModal.classList.add('hidden');
+        }
+
+        dom.openSettingsBtn.addEventListener('click', openSettings);
+        dom.closeSettingsBtn.addEventListener('click', closeSettings);
+
+        // Settings Steppers
+        document.querySelectorAll('.stepper-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget.dataset.target;
+                const step = parseInt(e.currentTarget.dataset.step, 10);
+
+                if (target === 'cfg-warmup') {
+                    CONFIG.warmupMinutes = Math.max(0, Math.min(15, CONFIG.warmupMinutes + step));
+                    dom.cfgWarmupVal.textContent = `${CONFIG.warmupMinutes}m`;
+                } else if (target === 'cfg-fast') {
+                    CONFIG.fastMinutes = Math.max(1, Math.min(10, CONFIG.fastMinutes + step));
+                    dom.cfgFastVal.textContent = `${CONFIG.fastMinutes}m`;
+                } else if (target === 'cfg-slow') {
+                    CONFIG.slowMinutes = Math.max(1, Math.min(10, CONFIG.slowMinutes + step));
+                    dom.cfgSlowVal.textContent = `${CONFIG.slowMinutes}m`;
+                } else if (target === 'cfg-sets') {
+                    CONFIG.totalSets = Math.max(1, Math.min(12, CONFIG.totalSets + step));
+                    dom.cfgSetsVal.textContent = `${CONFIG.totalSets}`;
+                } else if (target === 'cfg-cooldown') {
+                    CONFIG.cooldownMinutes = Math.max(0, Math.min(15, CONFIG.cooldownMinutes + step));
+                    dom.cfgCooldownVal.textContent = `${CONFIG.cooldownMinutes}m`;
+                }
+            });
+        });
+
+        // Preset buttons
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const preset = e.currentTarget.dataset.preset;
+                if (preset === 'standard') {
+                    CONFIG.warmupMinutes = 3;
+                    CONFIG.fastMinutes = 3;
+                    CONFIG.slowMinutes = 3;
+                    CONFIG.totalSets = 5;
+                    CONFIG.cooldownMinutes = 3;
+                    dom.presetLabel.textContent = 'Standard (3m/3m × 5)';
+                } else if (preset === 'quick') {
+                    CONFIG.warmupMinutes = 2;
+                    CONFIG.fastMinutes = 2;
+                    CONFIG.slowMinutes = 2;
+                    CONFIG.totalSets = 3;
+                    CONFIG.cooldownMinutes = 2;
+                    dom.presetLabel.textContent = 'Express (2m/2m × 3)';
+                } else if (preset === 'endurance') {
+                    CONFIG.warmupMinutes = 4;
+                    CONFIG.fastMinutes = 3;
+                    CONFIG.slowMinutes = 2;
+                    CONFIG.totalSets = 6;
+                    CONFIG.cooldownMinutes = 4;
+                    dom.presetLabel.textContent = 'Endurance (3m/2m × 6)';
+                }
+                dom.cfgWarmupVal.textContent = `${CONFIG.warmupMinutes}m`;
+                dom.cfgFastVal.textContent = `${CONFIG.fastMinutes}m`;
+                dom.cfgSlowVal.textContent = `${CONFIG.slowMinutes}m`;
+                dom.cfgSetsVal.textContent = `${CONFIG.totalSets}`;
+                dom.cfgCooldownVal.textContent = `${CONFIG.cooldownMinutes}m`;
+            });
+        });
+
+        // Save Settings
+        dom.saveSettingsBtn.addEventListener('click', () => {
+            CONFIG.halfwayEnabled = dom.cfgHalfwayEnabled.checked;
+            CONFIG.voiceEnabled = dom.cfgVoiceEnabled.checked;
+            CONFIG.beepsEnabled = dom.cfgBeepsEnabled.checked;
+            CONFIG.vibrateEnabled = dom.cfgVibrateEnabled.checked;
+            if (dom.cfgMediaSessionEnabled) {
+                CONFIG.mediaSessionEnabled = dom.cfgMediaSessionEnabled.checked;
+            }
+
+            try {
+                localStorage.setItem('iwt_timer_cfg', JSON.stringify(CONFIG));
+            } catch (e) {}
+
+            closeSettings();
+
+            // If timer wasn't running, rebuild plan
+            if (!isRunning) {
+                workoutPlan = generateWorkoutPlan();
+                renderTimeline();
+                updateUI();
+            }
+        });
+
+        // Close complete modal
+        dom.finishCloseBtn.addEventListener('click', () => {
+            dom.completeModal.classList.add('hidden');
+        });
+
+        // Initialization on page load
+        workoutPlan = generateWorkoutPlan();
+        renderTimeline();
+        setupMediaSession();
+        initBackgroundWorker();
+        updateUI();
+
+    </script>
+</body>
+</html>
